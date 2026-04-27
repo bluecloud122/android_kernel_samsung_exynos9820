@@ -30,7 +30,7 @@ jobs:
         run: |
           export CROSS_COMPILE=aarch64-linux-gnu-
           export ARCH=arm64
-          make ${{ github.event.inputs.defconfig || 'EXYNOS9820_DEFCONFIG' }}
+          make ${{ github.event.inputs.defconfig || 'exynos9820-d2s_defconfig' }}
           make -j$(nproc)
 
       - name: Upload zImage/Image
