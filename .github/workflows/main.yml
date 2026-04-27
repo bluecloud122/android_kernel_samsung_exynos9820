@@ -1,0 +1,43 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev make libc6-dev libncurses5-dev \
+            ccache curl clang gcc-aarch64-linux-gnu git
+
+      - name: Set up environment
+        run: |
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+          echo "ARCH=arm64" >> $GITHUB_ENV
+
+      - name: Build Kernel
+        run: |
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export ARCH=arm64
+          make ${{ github.event.inputs.defconfig || 'EXYNOS9820_DEFCONFIG' }}
+          make -j$(nproc)
+
+      - name: Upload zImage/Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build
+          path: |
+            arch/arm64/boot/Image*
+            arch/arm64/boot/zImage*
+            out/
