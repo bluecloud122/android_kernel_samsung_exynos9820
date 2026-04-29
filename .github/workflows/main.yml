@@ -22,10 +22,20 @@ jobs:
 
     strategy:
       matrix:
-        model: [d1, d1xks, d2s, d2x, d2xks]
+        include:
+          - model: d1
+            defconfig: exynos9820-d1_defconfig
+          - model: d1xks
+            defconfig: exynos9820-d1x_defconfig
+          - model: d2s
+            defconfig: exynos9820-d2s_defconfig
+          - model: d2x
+            defconfig: exynos9820-d2x_defconfig
+          - model: d2xks
+            defconfig: exynos9820-d2x_defconfig
 
     steps:
-      - name: Checkout repo
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -33,30 +43,30 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev-i386 x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig bc python3
+          sudo apt-get install -y git build-essential bc bison flex libssl-dev libncurses-dev gcc-aarch64-linux-gnu
 
-      - name: Skip unwanted builds
+      - name: Skip unwanted model
         if: ${{ github.event.inputs.model != 'all' && github.event.inputs.model != matrix.model }}
         run: exit 0
 
-      - name: Set build config
-        id: cfg
+      - name: Setup build output
+        run: mkdir -p out
+
+      - name: Build kernel config
         run: |
-          case "${{ matrix.model }}" in
-            d1) echo "config=build.config.universal9820" >> $GITHUB_OUTPUT ;;
-            d1xks) echo "config=build.config.universal9825" >> $GITHUB_OUTPUT ;;
-            d2s) echo "config=build.config.universal9820" >> $GITHUB_OUTPUT ;;
-            d2x) echo "config=build.config.universal9820" >> $GITHUB_OUTPUT ;;
-            d2xks) echo "config=build.config.universal9825" >> $GITHUB_OUTPUT ;;
-          esac
+          make ARCH=arm64 O=out ${{ matrix.defconfig }}
 
       - name: Build kernel
         run: |
-          chmod +x build/build.sh
-          BUILD_CONFIG=${{ steps.cfg.outputs.config }} build/build.sh
+          make ARCH=arm64 O=out -j$(nproc)
+
+      - name: Package kernel
+        run: |
+          mkdir -p release
+          cp -r out/arch/arm64/boot/* release/ || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Exynos9820-${{ matrix.model }}
-          path: out/*
+          path: release
