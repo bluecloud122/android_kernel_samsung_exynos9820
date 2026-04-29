@@ -1,109 +1,130 @@
-name: Integrate KernelSU Submodule and Patches
+name: Kernel Build Workflow
 
 on:
   workflow_dispatch:
+    inputs:
+      model:
+        description: "Model to build (leave empty to build all)"
+        required: false
+        default: "all"
+        type: choice
+        options:
+        - all
+        - d1
+        - d1xks
+        - d2s
+        - d2x
+        - d2xks
 
 jobs:
-  patch-kernelsu:
+  setup:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}  # <-- You must supply a Personal Access Token as a secret!
+    outputs:
+      should_build_all: ${{ github.event.inputs.model == 'all' }}
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev-i386 x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
+      - name: Set should_build_all output
+        run: echo "should_build_all=${{ github.event.inputs.model == 'all' }}" >> $GITHUB_OUTPUT
+
+  build_d1:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd1' || needs.setup.outputs.should_build_all == 'true' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          token: ${{ secrets.GH_TOKEN }}
-          
-      - name: Add KernelSU-Next submodule
+          submodules: 'recursive'
+      - name: Update submodules
         run: |
-          if [ ! -d KernelSU ]; then
-            git submodule add -b legacy https://github.com/KernelSU-Next/KernelSU-Next KernelSU
-          else
-            echo "KernelSU submodule already exists, skipping"
-          fi
           git submodule update --init --recursive
+          git submodule update --remote
+      - name: Build for d1
+        run: ./workflows.sh -m d1 -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d1
+          path: build/out/d1/zip
 
-      - name: Patch kernel source files
+  build_d1xks:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd1xks' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Update submodules
         run: |
-          # Patch defconfig (replace DEFCONFIG with your actual defconfig file)
-          DEFCONFIG_FILE=$(find arch/arm64/configs -type f -name "*defconfig" | head -n1)
-          if ! grep -q "CONFIG_KSU=y" "$DEFCONFIG_FILE"; then
-            echo -e "\n# KernelSU\nCONFIG_KSU=y" >> "$DEFCONFIG_FILE"
-          fi
-          # Patch fs/exec.c
-          if ! grep -q "extern bool ksu_execveat_hook" fs/exec.c 2>/dev/null; then
-            sed -i '/return retval;/a \
-#ifdef CONFIG_KSU\
-extern bool ksu_execveat_hook __read_mostly;\
-extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\
-extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\
-#endif' fs/exec.c
+          git submodule update --init --recursive
+          git submodule update --remote
+      - name: Build for d1xks
+        run: ./workflows.sh -m d1xks -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineagos-Nexus-d1xks
+          path: build/out/d1xks/zip
 
-            sed -i '/return __do_execve_file(fd, filename, argv, envp, flags, NULL);/i \
-#ifdef CONFIG_KSU\
-    if (unlikely(ksu_execveat_hook))\
-        ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);\
-    else\
-        ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);\
-#endif' fs/exec.c
-          fi
-          # Patch fs/open.c
-          if ! grep -q "extern int ksu_handle_faccessat" fs/open.c 2>/dev/null; then
-            sed -i '/return error;/a \
-#ifdef CONFIG_KSU\
-extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode, int *flags);\
-#endif' fs/open.c
-
-            sed -i '/SYSCALL_DEFINE3(faccessat.*/a \
-#ifdef CONFIG_KSU\
-    ksu_handle_faccessat(&dfd, &filename, &mode, NULL);\
-#endif' fs/open.c
-          fi
-          # Patch fs/stat.c
-          if ! grep -q "extern int ksu_handle_stat" fs/stat.c 2>/dev/null; then
-            sed -i '/EXPORT_SYMBOL(vfs_fstat);/a \
-#ifdef CONFIG_KSU\
-extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);\
-#endif' fs/stat.c
-
-            sed -i '/int vfs_fstatat(int dfd, const char __user \*filename, struct kstat \*stat, int flag)/a \
-#ifdef CONFIG_KSU\
-    ksu_handle_stat(&dfd, &filename, &flag);\
-#endif' fs/stat.c
-          fi
-          # Patch drivers/input/input.c
-          if ! grep -q "extern bool ksu_input_hook" drivers/input/input.c 2>/dev/null; then
-            sed -i '/return disposition;/a \
-#ifdef CONFIG_KSU\
-extern bool ksu_input_hook __read_mostly;\
-extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);\
-#endif' drivers/input/input.c
-
-            sed -i '/int disposition = input_get_disposition(dev, type, code, &value);/a \
-#ifdef CONFIG_KSU\
-    if (unlikely(ksu_input_hook))\
-        ksu_handle_input_handle_event(&type, &code, &value);\
-#endif' drivers/input/input.c
-          fi
-          # Patch fs/devpts/inode.c
-          if ! grep -q "extern int ksu_handle_devpts" fs/devpts/inode.c 2>/dev/null; then
-            sed -i '/return dentry;/a \
-#ifdef CONFIG_KSU\
-extern int ksu_handle_devpts(struct inode*);\
-#endif' fs/devpts/inode.c
-
-            sed -i '/if (dentry->d_sb->s_magic != DEVPTS_SUPER_MAGIC)/i \
-#ifdef CONFIG_KSU\
-    ksu_handle_devpts(dentry->d_inode);\
-#endif' fs/devpts/inode.c
-          fi
-
-      - name: Commit and push changes
+  build_d2s:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd2s' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Update submodules
         run: |
-          git config user.email "github-actions@github.com"
-          git config user.name "GitHub Actions"
-          git add KernelSU || true
-          git add arch/arm64/configs/*defconfig || true
-          git add fs/exec.c fs/open.c fs/stat.c drivers/input/input.c fs/devpts/inode.c || true
-          git diff --cached --quiet || git commit -m "Add KernelSU-Next submodule and integrate KernelSU hooks"
-          git push origin HEAD:${GITHUB_REF#refs/heads/}
+          git submodule sync --recursive
+          git submodule update --init --force --recursive
+      - name: Build for d2s
+        run: ./workflows.sh -m d2s -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineagos-Nexus-d2s
+          path: build/out/d2s/zip
+
+  build_d2x:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd2x' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Update submodules
+        run: |
+          git submodule update --init --recursive
+          git submodule update --remote
+      - name: Build for d2x
+        run: ./workflows.sh -m d2x -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2x
+          path: build/out/d2x/zip
+
+  build_d2xks:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd2xks' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Update submodules
+        run: |
+          git submodule update --init --recursive
+          git submodule update --remote
+      - name: Build for d2xks
+        run: ./workflows.sh -m d2xks -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2xks
+          path: build/out/d2xks/zip
