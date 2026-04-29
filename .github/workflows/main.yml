@@ -4,82 +4,128 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: "Device to build"
+        description: "Model to build (leave empty to build all)"
         required: false
         default: "all"
         type: choice
         options:
-          - all
-          - d1
-          - d1xks
-          - d2s
-          - d2x
-          - d2xks
+        - all
+        - d1
+        - d1xks
+        - d2s
+        - d2x
+        - d2xks
 
 jobs:
-  build:
+  setup:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        include:
-          - model: d1
-            defconfig: exynos9820-d1_defconfig
-          - model: d1xks
-            defconfig: exynos9820-d1x_defconfig
-          - model: d2s
-            defconfig: exynos9820-d2s_defconfig
-          - model: d2x
-            defconfig: exynos9820-d2x_defconfig
-          - model: d2xks
-            defconfig: exynos9820-d2x_defconfig
-
+    outputs:
+      should_build_all: ${{ github.event.inputs.model == 'all' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison flex libssl-dev libncurses-dev zip curl git wget python3 clang lld llvm
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev-i386 x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
+      - name: Set should_build_all output
+        run: echo "should_build_all=${{ github.event.inputs.model == 'all' }}" >> $GITHUB_OUTPUT
 
-      - name: Skip unwanted model
-        if: ${{ github.event.inputs.model != 'all' && github.event.inputs.model != matrix.model }}
-        run: exit 0
-
-      - name: Set up environment
+  build_d1:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd1' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Update submodules
         run: |
-          mkdir -p out
-          export ARCH=arm64
-          export SUBARCH=arm64
-
-      - name: Set Clang toolchain
-        run: |
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-
-      - name: Build defconfig
-        run: |
-          make ARCH=arm64 O=out ${{ matrix.defconfig }}
-
-      - name: Build kernel with Clang
-        run: |
-          make ARCH=arm64 O=out \
-            CC=clang \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            -j$(nproc)
-
-      - name: Package output
-        run: |
-          mkdir -p release
-          cp out/arch/arm64/boot/Image* release/ || true
-          cp out/arch/arm64/boot/dtb* release/ || true
-
+          git submodule update --init --recursive
+          git submodule update --remote
+      - name: Build for d1
+        run: ./workflows.sh -m d1 -k Y -r N
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Exynos9820-${{ matrix.model }}
-          path: release
+          name: ExtremeKRNL-Nexus-d1
+          path: build/out/d1/zip
+
+  build_d1xks:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd1xks' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Update submodules
+        run: |
+          git submodule update --init --recursive
+          git submodule update --remote
+      - name: Build for d1xks
+        run: ./workflows.sh -m d1xks -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d1xks
+          path: build/out/d1xks/zip
+
+  build_d2s:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd2s' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          token: ${{ secrets.FCK_SUBMODULES }}
+      - name: Update submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --force --recursive --remote
+      - name: Build for d2s
+        run: ./workflows.sh -m d2s -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2s
+          path: build/out/d2s/zip
+
+  build_d2x:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd2x' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Update submodules
+        run: |
+          git submodule update --init --recursive
+          git submodule update --remote
+      - name: Build for d2x
+        run: ./workflows.sh -m d2x -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2x
+          path: build/out/d2x/zip
+
+  build_d2xks:
+    needs: setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.model == 'd2xks' || needs.setup.outputs.should_build_all == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - name: Update submodules
+        run: |
+          git submodule update --init --recursive
+          git submodule update --remote
+      - name: Build for d2xks
+        run: ./workflows.sh -m d2xks -k Y -r N
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtremeKRNL-Nexus-d2xks
+          path: build/out/d2xks/zip
