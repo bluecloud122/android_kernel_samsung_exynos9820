@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: "Model to build (leave empty to build all)"
+        description: "Device to build"
         required: false
         default: "all"
         type: choice
@@ -17,17 +17,7 @@ on:
           - d2xks
 
 jobs:
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      model: ${{ github.event.inputs.model }}
-    steps:
-      - name: Set model output
-        run: echo "model=${{ github.event.inputs.model }}" >> $GITHUB_OUTPUT
-
-
   build:
-    needs: setup
     runs-on: ubuntu-latest
 
     strategy:
@@ -35,28 +25,38 @@ jobs:
         model: [d1, d1xks, d2s, d2x, d2xks]
 
     steps:
-      - name: Skip unwanted models
-        if: ${{ needs.setup.outputs.model != 'all' && needs.setup.outputs.model != matrix.model }}
-        run: echo "Skipping build for ${{ matrix.model }}"
-
-      - name: Stop job if skipped
-        if: ${{ needs.setup.outputs.model != 'all' && needs.setup.outputs.model != matrix.model }}
-        run: exit 0
-
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Update submodules
+      - name: Install dependencies
         run: |
-          git submodule sync --recursive
-          git submodule update --init --force --recursive --remote
+          sudo apt-get update
+          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev-i386 x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig bc python3
 
-      - name: Build kernel (${{ matrix.model }})
-        run: ./workflows.sh -m ${{ matrix.model }} -k Y -r N
+      - name: Skip unwanted builds
+        if: ${{ github.event.inputs.model != 'all' && github.event.inputs.model != matrix.model }}
+        run: exit 0
+
+      - name: Set build config
+        id: cfg
+        run: |
+          case "${{ matrix.model }}" in
+            d1) echo "config=build.config.universal9820" >> $GITHUB_OUTPUT ;;
+            d1xks) echo "config=build.config.universal9825" >> $GITHUB_OUTPUT ;;
+            d2s) echo "config=build.config.universal9820" >> $GITHUB_OUTPUT ;;
+            d2x) echo "config=build.config.universal9820" >> $GITHUB_OUTPUT ;;
+            d2xks) echo "config=build.config.universal9825" >> $GITHUB_OUTPUT ;;
+          esac
+
+      - name: Build kernel
+        run: |
+          chmod +x build/build.sh
+          BUILD_CONFIG=${{ steps.cfg.outputs.config }} build/build.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeKRNL-${{ matrix.model }}
-          path: build/out/${{ matrix.model }}/zip
+          name: Exynos9820-${{ matrix.model }}
+          path: out/*
