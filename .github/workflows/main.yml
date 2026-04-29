@@ -35,7 +35,7 @@ jobs:
             defconfig: exynos9820-d2x_defconfig
 
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -43,27 +43,40 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential bc bison flex libssl-dev libncurses-dev gcc-aarch64-linux-gnu
+          sudo apt-get install -y bc bison flex libssl-dev libncurses-dev zip curl git wget python3 clang lld llvm
 
       - name: Skip unwanted model
         if: ${{ github.event.inputs.model != 'all' && github.event.inputs.model != matrix.model }}
         run: exit 0
 
-      - name: Setup build output
-        run: mkdir -p out
+      - name: Set up environment
+        run: |
+          mkdir -p out
+          export ARCH=arm64
+          export SUBARCH=arm64
 
-      - name: Build kernel config
+      - name: Set Clang toolchain
+        run: |
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
+
+      - name: Build defconfig
         run: |
           make ARCH=arm64 O=out ${{ matrix.defconfig }}
 
-      - name: Build kernel
+      - name: Build kernel with Clang
         run: |
-          make ARCH=arm64 O=out -j$(nproc)
+          make ARCH=arm64 O=out \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            -j$(nproc)
 
-      - name: Package kernel
+      - name: Package output
         run: |
           mkdir -p release
-          cp -r out/arch/arm64/boot/* release/ || true
+          cp out/arch/arm64/boot/Image* release/ || true
+          cp out/arch/arm64/boot/dtb* release/ || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
